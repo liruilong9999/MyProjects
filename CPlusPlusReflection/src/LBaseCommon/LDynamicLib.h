@@ -10,6 +10,10 @@
 #endif
 namespace LDynamicLibrary
 {
+    namespace params
+    {
+        std::vector<void*> handles;    
+    };
     // 加载动态库返回类型HMODULE的值为空，表示加载失败
 
     // 加载动态链接库

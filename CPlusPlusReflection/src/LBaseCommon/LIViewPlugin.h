@@ -25,6 +25,8 @@ public:
 	LIViewPluginParam GetPluginParam();
 	//获取插件类名
 	const std::string GetPluginClassName();
+	//设置插件类名
+    void SetPluginClassName(const std::string & className);
 	//启用插件/禁用插件
 	virtual void UsePlugin(bool IsUse);
 	

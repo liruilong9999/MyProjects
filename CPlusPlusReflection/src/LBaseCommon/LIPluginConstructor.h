@@ -15,14 +15,16 @@ public:
 DEF_CLASSSHARED_PTR(LIPluginConstructor);
 
 // ²å¼þ×¢²áºê
-#define DEF_PlUGINREGISTERCONSTRUCTIR(pluginName)       \
-    class pluginName##Constructor : public LIPluginConstructor \
-    {                                                   \
-    public:                                             \
-        virtual LIViewPlugin ConstructorPlugin()         \
-        {\
-            \
-        }\
+#define DEF_PlUGINREGISTERCONSTRUCTIR(pluginName)                   \
+    class pluginName##Constructor : public LIPluginConstructor      \
+    {                                                               \
+    public:                                                         \
+        virtual LIViewPluginPtr ConstructorPlugin()                 \
+        {                                                           \
+            LIViewPluginPtr plu = std::make_shared<LIViewPlugin>(); \
+            plu->SetPluginClassName(pluginName);                    \
+            return plu;                                             \
+        }                                                           \
     };
 
 #endif

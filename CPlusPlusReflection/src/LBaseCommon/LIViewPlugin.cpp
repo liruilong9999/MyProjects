@@ -7,7 +7,9 @@ struct LIViewPluginParam
 	{
 
 	}
-
+    std::string _PluginName;
+    std::string _PluginDiscripe;
+    std::string _PluginClassName;
 };
 
 LIViewPlugin::LIViewPlugin()
@@ -59,4 +61,9 @@ const std::string LIViewPlugin::GetPluginClassName()
 void LIViewPlugin::UsePlugin(bool IsUse)
 {
 
+}
+
+void LIViewPlugin::SetPluginClassName(const std::string& className)
+{
+    _P->_PluginClassName = className;
 }

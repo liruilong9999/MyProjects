@@ -22,8 +22,22 @@ FARPROC LDynamicLibrary::GetFounctionByLibrary(HMODULE hModule, const std::strin
 
 void LDynamicLibrary::FreeDynamicLibrary(HMODULE hModule)
 {
+#ifdef _WIN32
+    FreeLibrary(hModule); // Windows下的动态库关闭函数
+#else
+    dlclose(handle);                                      // Linux下的动态库关闭函数
+#endif
 }
 
 void LDynamicLibrary::FreeAllLoadedDynamicLibrary()
 {
+    // 关闭动态链接库
+    for (void* handle : params::handles)
+    {
+#ifdef _WIN32
+        FreeLibrary((HMODULE)handle); // Windows下的动态库关闭函数
+#else
+        dlclose(handle);                                  // Linux下的动态库关闭函数
+#endif
+    }
 }
