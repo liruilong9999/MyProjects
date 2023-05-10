@@ -20,7 +20,7 @@ endif()
 
 # 开启使用文件夹功能，将所有默认目标放入到名为 CMakePredefinedTargets 的文件夹中
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
-set_property(GLOBAL PROPERTY PREDEFINED_TARGETS_FOLDER "CMakePredefinedTargets")
+set_property(GLOBAL PROPERTY PREDEFINED_TARGETS_FOLDER "_CMakePredefinedTargets")
 
 # 设置根目录
 set(ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})

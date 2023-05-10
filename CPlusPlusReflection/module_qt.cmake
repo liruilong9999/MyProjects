@@ -1,11 +1,11 @@
 # 设置 qt 目录
 if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     # 方法一
-    set(Qt5_DIR "C:\\Qt\\Qt5.14.2\\5.14.2\\msvc2017_64\\lib\\cmake\\Qt5")
+    set(Qt5_DIR "C:\\ThirdPart\\Qt5.14\\lib\\cmake\\Qt5")
     # 方法二
     # set(CMAKE_PREFIX_PATH "C:\\Qt\\Qt5.14.2\\5.14.2\\msvc2017_64")
 else()
-    set(CMAKE_PREFIX_PATH "C:\\Qt\\Qt5.14.2\\5.14.2\\mingw73_64\\lib\\cmake\\Qt5")
+    set(CMAKE_PREFIX_PATH "C:\\ThirdPart\\Qt5.14\\lib\\cmake\\Qt5")
 endif()
 # 自动生成
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
