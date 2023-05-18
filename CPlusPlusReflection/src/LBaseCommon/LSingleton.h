@@ -9,7 +9,7 @@ template<typename T>
 class LBASECOMMON_EXPORT LSingleton
 {
 public:
-	static T& getInstance() {
+	static T& GetInstance() {
 		static T instance;
 		return instance;
 	}
@@ -17,8 +17,10 @@ public:
 protected:
 	LSingleton() = default;
 	~LSingleton() = default;
-	LSingleton(const LSingleton&) = delete;
-	LSingleton& operator=(const LSingleton&) = delete;
+    LSingleton(const LSingleton&)            = delete;
+    LSingleton& operator=(const LSingleton&) = delete;
+    LSingleton(LSingleton&&)                 = delete;
+    LSingleton& operator=(LSingleton&&)      = delete;
 };
 
 //×¢²áÓÑÔªºê
