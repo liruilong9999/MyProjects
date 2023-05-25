@@ -2,6 +2,7 @@
 
 #include <condition_variable>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <queue>
 #include <thread>
@@ -13,58 +14,79 @@ class EventBus
 public:
     struct CallbackItem
     {
-        std::function<void(int, void*, int)> callback;
-        int                                  priority;
-        void*                                rawObject;
+        std::function<void(int, std::shared_ptr<void>, int)> callback;
+        int                                                  priority;
+        std::weak_ptr<void>                                  rawObject;
+
+        bool operator==(const CallbackItem& other) const
+        {
+            return callback.target_type() == other.callback.target_type() &&
+                   rawObject.lock() == other.rawObject.lock();
+        }
     };
 
     struct EventCallbacksItem
     {
         std::vector<CallbackItem> callbacks;
-        std::mutex                mutex; // 用于保护回调函数列表的互斥锁
+        std::mutex                mutex;
     };
 
     struct EventQueueItem
     {
         int                       eventCode;
-        void*                     data;
+        std::shared_ptr<void>     data;
         int                       receiverId;
         std::vector<CallbackItem> callbacks;
     };
 
     struct StickyEvent
     {
-        int   eventCode;
-        void* data;
-        int   receiverId;
+        int                   eventCode;
+        std::shared_ptr<void> data;
+        int                   receiverId;
     };
 
-    void post(int eventCode, void* data, int receiverId);
+    EventBus();
+    ~EventBus();
 
-    void subscribe(int eventCode, std::function<void(int, void*, int)> callback, int priority = 0, void* rawObject = nullptr);
-
-    void unsubscribe(int eventCode, std::function<void(int, void*, int)> callback);
-
-    void unsubscribeByRawObject(void* rawObject);
-
-    void handlePost();
-
-    void postStickyEvent(int eventCode, void* data, int receiverId);
-
-    void handleStickyEvents();
+    void post(int eventCode, std::shared_ptr<void> data, int receiverId);
+    void subscribe(int eventCode, std::function<void(int, std::shared_ptr<void>, int)> callback, int priority = 0, std::shared_ptr<void> rawObject = nullptr);
+    void unsubscribe(int eventCode, std::function<void(int, std::shared_ptr<void>, int)> callback);
+    void unsubscribeByRawObject(std::shared_ptr<void> rawObject);
+    void stop();
 
 private:
     std::unordered_map<int, EventCallbacksItem> eventCallbacks;
     std::queue<EventQueueItem>                  eventQueue;
     std::unordered_map<int, StickyEvent>        stickyEvents;
-    std::mutex                                  eventQueueMutex; // 用于保护事件队列的互斥锁
-    std::condition_variable                     eventQueueCV;    // 用于事件队列的条件变量，用于唤醒等待处理事件的线程
+    std::mutex                                  eventQueueMutex;
+    std::condition_variable                     eventQueueCV;
+    std::mutex                                  stickyEventsMutex;
+    bool                                        running;
+    std::thread                                 eventThread;
 
+    void handlePost();
     void handleEvents(const EventQueueItem& eventQueueItem);
+    void postStickyEvent(int eventCode, std::shared_ptr<void> data, int receiverId);
+    void handleStickyEvents();
+    void removeExpiredCallbacks();
+
+    // 新增辅助函数
+    void executeCallback(const CallbackItem& callbackItem, int eventCode, std::shared_ptr<void> data, int receiverId);
 };
 
-// 发布一个事件
-void EventBus::post(int eventCode, void* data, int receiverId)
+EventBus::EventBus()
+    : running(true)
+{
+    eventThread = std::thread(&EventBus::handlePost, this);
+}
+
+EventBus::~EventBus()
+{
+    stop();
+}
+
+void EventBus::post(int eventCode, std::shared_ptr<void> data, int receiverId)
 {
     std::lock_guard<std::mutex> lock(eventQueueMutex);
     auto                        eventCallbacksItem = eventCallbacks.find(eventCode);
@@ -72,12 +94,11 @@ void EventBus::post(int eventCode, void* data, int receiverId)
     {
         EventQueueItem eventQueueItem = {eventCode, data, receiverId, eventCallbacksItem->second.callbacks};
         eventQueue.push(eventQueueItem);
-        eventQueueCV.notify_all(); // 唤醒等待处理事件的线程
+        eventQueueCV.notify_all();
     }
 }
 
-// 订阅一个事件
-void EventBus::subscribe(int eventCode, std::function<void(int, void*, int)> callback, int priority, void* rawObject)
+void EventBus::subscribe(int eventCode, std::function<void(int, std::shared_ptr<void>, int)> callback, int priority, std::shared_ptr<void> rawObject)
 {
     std::lock_guard<std::mutex> lock(eventCallbacks[eventCode].mutex);
     CallbackItem                callbackItem = {callback, priority, rawObject};
@@ -86,22 +107,18 @@ void EventBus::subscribe(int eventCode, std::function<void(int, void*, int)> cal
               { return a.priority > b.priority; });
 }
 
-// 取消订阅一个事件
-void EventBus::unsubscribe(int eventCode, std::function<void(int, void*, int)> callback)
+void EventBus::unsubscribe(int eventCode, std::function<void(int, std::shared_ptr<void>, int)> callback)
 {
     std::lock_guard<std::mutex> lock(eventCallbacks[eventCode].mutex);
     auto&                       callbacks = eventCallbacks[eventCode].callbacks;
-    callbacks.erase(std::remove_if(callbacks.begin(), callbacks.end(), [&](const CallbackItem& item)
-                                   { return item.callback.target_type() == callback.target_type(); }),
-                    callbacks.end());
+    callbacks.erase(std::remove(callbacks.begin(), callbacks.end(), callback), callbacks.end());
     if (callbacks.empty())
     {
         eventCallbacks.erase(eventCode);
     }
 }
 
-// 根据对象取消订阅事件
-void EventBus::unsubscribeByRawObject(void* rawObject)
+void EventBus::unsubscribeByRawObject(std::shared_ptr<void> rawObject)
 {
     std::lock_guard<std::mutex> lock(eventQueueMutex);
     for (auto& eventCallbacksItem : eventCallbacks)
@@ -109,7 +126,7 @@ void EventBus::unsubscribeByRawObject(void* rawObject)
         std::lock_guard<std::mutex> lock(eventCallbacksItem.second.mutex);
         auto&                       callbacks = eventCallbacksItem.second.callbacks;
         callbacks.erase(std::remove_if(callbacks.begin(), callbacks.end(), [&](const CallbackItem& item)
-                                       { return item.rawObject == rawObject; }),
+                                       { return item.rawObject.lock() == rawObject; }),
                         callbacks.end());
         if (callbacks.empty())
         {
@@ -118,48 +135,94 @@ void EventBus::unsubscribeByRawObject(void* rawObject)
     }
 }
 
-// 处理事件队列中的事件
 void EventBus::handlePost()
 {
-    while (true)
+    while (running)
     {
         EventQueueItem eventQueueItem;
         {
             std::unique_lock<std::mutex> lock(eventQueueMutex);
             eventQueueCV.wait(lock, [&]
-                              { return !eventQueue.empty(); }); // 等待事件队列不为空
+                              { return !eventQueue.empty() || !running; });
+            if (!running)
+                return;
             eventQueueItem = eventQueue.front();
             eventQueue.pop();
         }
         handleEvents(eventQueueItem);
+        removeExpiredCallbacks(); // 移除过期的回调函数
     }
 }
 
-// 处理事件队列中的事件项
 void EventBus::handleEvents(const EventQueueItem& eventQueueItem)
 {
     std::lock_guard<std::mutex> lock(eventCallbacks[eventQueueItem.eventCode].mutex);
     for (const CallbackItem& callbackItem : eventQueueItem.callbacks)
     {
-        callbackItem.callback(eventQueueItem.eventCode, eventQueueItem.data, eventQueueItem.receiverId);
+        auto rawObject = callbackItem.rawObject.lock();
+        if (rawObject)
+        {
+            executeCallback(callbackItem, eventQueueItem.eventCode, eventQueueItem.data, eventQueueItem.receiverId);
+        }
     }
 }
 
-// 发布一个粘性事件
-void EventBus::postStickyEvent(int eventCode, void* data, int receiverId)
+void EventBus::postStickyEvent(int eventCode, std::shared_ptr<void> data, int receiverId)
 {
     std::lock_guard<std::mutex> lock(eventQueueMutex);
+    std::lock_guard<std::mutex> stickyLock(stickyEventsMutex);
     StickyEvent                 stickyEvent = {eventCode, data, receiverId};
     stickyEvents[eventCode]                 = stickyEvent;
     post(eventCode, data, receiverId);
 }
 
-// 处理粘性事件
 void EventBus::handleStickyEvents()
 {
     std::lock_guard<std::mutex> lock(eventQueueMutex);
-    for (auto& stickyEvent : stickyEvents)
+    std::lock_guard<std::mutex> stickyLock(stickyEventsMutex);
+    for (const auto& stickyEvent : stickyEvents)
     {
         handleEvents({stickyEvent.second.eventCode, stickyEvent.second.data, stickyEvent.second.receiverId, eventCallbacks[stickyEvent.second.eventCode].callbacks});
+    }
+}
+
+void EventBus::stop()
+{
+    {
+        std::lock_guard<std::mutex> lock(eventQueueMutex);
+        running = false;
+        eventQueueCV.notify_all();
+    }
+    if (eventThread.joinable())
+    {
+        eventThread.join();
+    }
+}
+
+void EventBus::removeExpiredCallbacks()
+{
+    for (auto& eventCallbacksItem : eventCallbacks)
+    {
+        std::lock_guard<std::mutex> lock(eventCallbacksItem.second.mutex);
+        auto&                       callbacks = eventCallbacksItem.second.callbacks;
+        callbacks.erase(std::remove_if(callbacks.begin(), callbacks.end(), [](const CallbackItem& item)
+                                       { return item.rawObject.expired(); }),
+                        callbacks.end());
+        if (callbacks.empty())
+        {
+            eventCallbacks.erase(eventCallbacksItem.first);
+        }
+    }
+}
+
+void EventBus::executeCallback(const CallbackItem& callbackItem, int eventCode, std::shared_ptr<void> data, int receiverId)
+{
+    try
+    {
+        callbackItem.callback(eventCode, data, receiverId);
+    }
+    catch (const std::bad_function_call& e)
+    {
+        // Handle exception or logging
     }
 }
