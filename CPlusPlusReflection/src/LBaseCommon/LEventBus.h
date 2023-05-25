@@ -1,27 +1,32 @@
 #pragma once
 
+#include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <stdexcept>
 #include <thread>
 #include <unordered_map>
 #include <vector>
 
+template <typename EventData>
 class EventBus
 {
 public:
     struct CallbackItem
     {
-        std::function<void(int, std::shared_ptr<void>, int)> callback;
-        int                                                  priority;
-        std::weak_ptr<void>                                  rawObject;
+        using CallbackFunc = void (*)(int, std::shared_ptr<EventData>, int);
+        CallbackFunc              callback;
+        int                       priority;
+        std::weak_ptr<void>       context;
+        std::chrono::milliseconds timeout;
 
         bool operator==(const CallbackItem& other) const
         {
-            return callback.target_type() == other.callback.target_type() &&
-                   rawObject.lock() == other.rawObject.lock();
+            return callback == other.callback && context.lock() == other.context.lock();
         }
     };
 
@@ -33,60 +38,56 @@ public:
 
     struct EventQueueItem
     {
-        int                       eventCode;
-        std::shared_ptr<void>     data;
-        int                       receiverId;
-        std::vector<CallbackItem> callbacks;
-    };
-
-    struct StickyEvent
-    {
-        int                   eventCode;
-        std::shared_ptr<void> data;
-        int                   receiverId;
+        int                        eventCode;
+        std::shared_ptr<EventData> data;
+        int                        receiverId;
+        std::vector<CallbackItem>  callbacks;
     };
 
     EventBus();
     ~EventBus();
 
-    void post(int eventCode, std::shared_ptr<void> data, int receiverId);
-    void subscribe(int eventCode, std::function<void(int, std::shared_ptr<void>, int)> callback, int priority = 0, std::shared_ptr<void> rawObject = nullptr);
-    void unsubscribe(int eventCode, std::function<void(int, std::shared_ptr<void>, int)> callback);
-    void unsubscribeByRawObject(std::shared_ptr<void> rawObject);
+    void post(int eventCode, std::shared_ptr<EventData> data, int receiverId);
+    void subscribe(int eventCode, void (*callback)(int, std::shared_ptr<EventData>, int), int priority = 0, std::shared_ptr<void> context = nullptr);
+    void unsubscribe(int eventCode, void (*callback)(int, std::shared_ptr<EventData>, int));
+    void unsubscribeByContext(std::shared_ptr<void> context);
     void stop();
+
+    void setBusTimeout(std::chrono::milliseconds timeout);
+    void setEventQueueTimeout(std::chrono::milliseconds timeout);
 
 private:
     std::unordered_map<int, EventCallbacksItem> eventCallbacks;
     std::queue<EventQueueItem>                  eventQueue;
-    std::unordered_map<int, StickyEvent>        stickyEvents;
     std::mutex                                  eventQueueMutex;
     std::condition_variable                     eventQueueCV;
-    std::mutex                                  stickyEventsMutex;
-    bool                                        running;
+    std::atomic<bool>                           running;
     std::thread                                 eventThread;
+    std::chrono::milliseconds                   busTimeout;
+    std::chrono::milliseconds                   eventQueueTimeout;
 
     void handlePost();
     void handleEvents(const EventQueueItem& eventQueueItem);
-    void postStickyEvent(int eventCode, std::shared_ptr<void> data, int receiverId);
-    void handleStickyEvents();
     void removeExpiredCallbacks();
 
-    // 新增辅助函数
-    void executeCallback(const CallbackItem& callbackItem, int eventCode, std::shared_ptr<void> data, int receiverId);
+    void executeCallback(const CallbackItem& callbackItem, int eventCode, std::shared_ptr<EventData> data, int receiverId);
 };
 
-EventBus::EventBus()
-    : running(true)
+template <typename EventData>
+EventBus<EventData>::EventBus()
+    : running(true), busTimeout(std::chrono::milliseconds::zero()), eventQueueTimeout(std::chrono::milliseconds::zero())
 {
     eventThread = std::thread(&EventBus::handlePost, this);
 }
 
-EventBus::~EventBus()
+template <typename EventData>
+EventBus<EventData>::~EventBus()
 {
     stop();
 }
 
-void EventBus::post(int eventCode, std::shared_ptr<void> data, int receiverId)
+template <typename EventData>
+void EventBus<EventData>::post(int eventCode, std::shared_ptr<EventData> data, int receiverId)
 {
     std::lock_guard<std::mutex> lock(eventQueueMutex);
     auto                        eventCallbacksItem = eventCallbacks.find(eventCode);
@@ -98,16 +99,18 @@ void EventBus::post(int eventCode, std::shared_ptr<void> data, int receiverId)
     }
 }
 
-void EventBus::subscribe(int eventCode, std::function<void(int, std::shared_ptr<void>, int)> callback, int priority, std::shared_ptr<void> rawObject)
+template <typename EventData>
+void EventBus<EventData>::subscribe(int eventCode, void (*callback)(int, std::shared_ptr<EventData>, int), int priority, std::shared_ptr<void> context)
 {
     std::lock_guard<std::mutex> lock(eventCallbacks[eventCode].mutex);
-    CallbackItem                callbackItem = {callback, priority, rawObject};
+    CallbackItem                callbackItem = {callback, priority, context, std::chrono::milliseconds::zero()};
     eventCallbacks[eventCode].callbacks.push_back(callbackItem);
     std::sort(eventCallbacks[eventCode].callbacks.begin(), eventCallbacks[eventCode].callbacks.end(), [](const CallbackItem& a, const CallbackItem& b)
               { return a.priority > b.priority; });
 }
 
-void EventBus::unsubscribe(int eventCode, std::function<void(int, std::shared_ptr<void>, int)> callback)
+template <typename EventData>
+void EventBus<EventData>::unsubscribe(int eventCode, void (*callback)(int, std::shared_ptr<EventData>, int))
 {
     std::lock_guard<std::mutex> lock(eventCallbacks[eventCode].mutex);
     auto&                       callbacks = eventCallbacks[eventCode].callbacks;
@@ -118,7 +121,8 @@ void EventBus::unsubscribe(int eventCode, std::function<void(int, std::shared_pt
     }
 }
 
-void EventBus::unsubscribeByRawObject(std::shared_ptr<void> rawObject)
+template <typename EventData>
+void EventBus<EventData>::unsubscribeByContext(std::shared_ptr<void> context)
 {
     std::lock_guard<std::mutex> lock(eventQueueMutex);
     for (auto& eventCallbacksItem : eventCallbacks)
@@ -126,7 +130,7 @@ void EventBus::unsubscribeByRawObject(std::shared_ptr<void> rawObject)
         std::lock_guard<std::mutex> lock(eventCallbacksItem.second.mutex);
         auto&                       callbacks = eventCallbacksItem.second.callbacks;
         callbacks.erase(std::remove_if(callbacks.begin(), callbacks.end(), [&](const CallbackItem& item)
-                                       { return item.rawObject.lock() == rawObject; }),
+                                       { return item.context.lock() == context; }),
                         callbacks.end());
         if (callbacks.empty())
         {
@@ -135,58 +139,8 @@ void EventBus::unsubscribeByRawObject(std::shared_ptr<void> rawObject)
     }
 }
 
-void EventBus::handlePost()
-{
-    while (running)
-    {
-        EventQueueItem eventQueueItem;
-        {
-            std::unique_lock<std::mutex> lock(eventQueueMutex);
-            eventQueueCV.wait(lock, [&]
-                              { return !eventQueue.empty() || !running; });
-            if (!running)
-                return;
-            eventQueueItem = eventQueue.front();
-            eventQueue.pop();
-        }
-        handleEvents(eventQueueItem);
-        removeExpiredCallbacks(); // 移除过期的回调函数
-    }
-}
-
-void EventBus::handleEvents(const EventQueueItem& eventQueueItem)
-{
-    std::lock_guard<std::mutex> lock(eventCallbacks[eventQueueItem.eventCode].mutex);
-    for (const CallbackItem& callbackItem : eventQueueItem.callbacks)
-    {
-        auto rawObject = callbackItem.rawObject.lock();
-        if (rawObject)
-        {
-            executeCallback(callbackItem, eventQueueItem.eventCode, eventQueueItem.data, eventQueueItem.receiverId);
-        }
-    }
-}
-
-void EventBus::postStickyEvent(int eventCode, std::shared_ptr<void> data, int receiverId)
-{
-    std::lock_guard<std::mutex> lock(eventQueueMutex);
-    std::lock_guard<std::mutex> stickyLock(stickyEventsMutex);
-    StickyEvent                 stickyEvent = {eventCode, data, receiverId};
-    stickyEvents[eventCode]                 = stickyEvent;
-    post(eventCode, data, receiverId);
-}
-
-void EventBus::handleStickyEvents()
-{
-    std::lock_guard<std::mutex> lock(eventQueueMutex);
-    std::lock_guard<std::mutex> stickyLock(stickyEventsMutex);
-    for (const auto& stickyEvent : stickyEvents)
-    {
-        handleEvents({stickyEvent.second.eventCode, stickyEvent.second.data, stickyEvent.second.receiverId, eventCallbacks[stickyEvent.second.eventCode].callbacks});
-    }
-}
-
-void EventBus::stop()
+template <typename EventData>
+void EventBus<EventData>::stop()
 {
     {
         std::lock_guard<std::mutex> lock(eventQueueMutex);
@@ -199,14 +153,104 @@ void EventBus::stop()
     }
 }
 
-void EventBus::removeExpiredCallbacks()
+template <typename EventData>
+void EventBus<EventData>::setBusTimeout(std::chrono::milliseconds timeout)
 {
+    busTimeout = timeout;
+}
+
+template <typename EventData>
+void EventBus<EventData>::setEventQueueTimeout(std::chrono::milliseconds timeout)
+{
+    eventQueueTimeout = timeout;
+}
+
+template <typename EventData>
+void EventBus<EventData>::handlePost()
+{
+    while (running)
+    {
+        EventQueueItem eventQueueItem;
+        {
+            std::unique_lock<std::mutex> lock(eventQueueMutex);
+            if (eventQueueTimeout.count() > 0)
+            {
+                if (eventQueueCV.wait_for(lock, eventQueueTimeout, [&]
+                                          { return !eventQueue.empty() || !running; }))
+                {
+                    if (!running)
+                        return;
+                    eventQueueItem = eventQueue.front();
+                    eventQueue.pop();
+                }
+                else
+                {
+                    // Handle bus timeout event
+                    // ...
+                    continue;
+                }
+            }
+            else
+            {
+                eventQueueCV.wait(lock, [&]
+                                  { return !eventQueue.empty() || !running; });
+                if (!running)
+                    return;
+                eventQueueItem = eventQueue.front();
+                eventQueue.pop();
+            }
+        }
+        handleEvents(eventQueueItem);
+        removeExpiredCallbacks();
+    }
+}
+
+template <typename EventData>
+void EventBus<EventData>::handleEvents(const EventQueueItem& eventQueueItem)
+{
+    std::lock_guard<std::mutex> lock(eventCallbacks[eventQueueItem.eventCode].mutex);
+    for (const CallbackItem& callbackItem : eventQueueItem.callbacks)
+    {
+        auto context = callbackItem.context.lock();
+        if (context)
+        {
+            auto start   = std::chrono::steady_clock::now();
+            auto end     = start + callbackItem.timeout;
+            bool timeout = false;
+
+            while (std::chrono::steady_clock::now() < end)
+            {
+                try
+                {
+                    executeCallback(callbackItem, eventQueueItem.eventCode, eventQueueItem.data, eventQueueItem.receiverId);
+                    break;
+                }
+                catch (const std::exception&)
+                {
+                    // Handle exception
+                    // ...
+                }
+            }
+
+            if (timeout)
+            {
+                // Handle timeout event
+                // ...
+            }
+        }
+    }
+}
+
+template <typename EventData>
+void EventBus<EventData>::removeExpiredCallbacks()
+{
+    std::lock_guard<std::mutex> lock(eventQueueMutex);
     for (auto& eventCallbacksItem : eventCallbacks)
     {
         std::lock_guard<std::mutex> lock(eventCallbacksItem.second.mutex);
         auto&                       callbacks = eventCallbacksItem.second.callbacks;
-        callbacks.erase(std::remove_if(callbacks.begin(), callbacks.end(), [](const CallbackItem& item)
-                                       { return item.rawObject.expired(); }),
+        callbacks.erase(std::remove_if(callbacks.begin(), callbacks.end(), [&](const CallbackItem& item)
+                                       { return item.context.expired(); }),
                         callbacks.end());
         if (callbacks.empty())
         {
@@ -215,14 +259,16 @@ void EventBus::removeExpiredCallbacks()
     }
 }
 
-void EventBus::executeCallback(const CallbackItem& callbackItem, int eventCode, std::shared_ptr<void> data, int receiverId)
+template <typename EventData>
+void EventBus<EventData>::executeCallback(const CallbackItem& callbackItem, int eventCode, std::shared_ptr<EventData> data, int receiverId)
 {
     try
     {
         callbackItem.callback(eventCode, data, receiverId);
     }
-    catch (const std::bad_function_call& e)
+    catch (const std::exception& e)
     {
-        // Handle exception or logging
+        // 记录异常日志
+        // ...
     }
 }
