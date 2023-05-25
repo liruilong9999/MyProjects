@@ -30,3 +30,6 @@ set_property(TARGET MyPlugin PROPERTY FOLDER "plugins")
 # 构建main可执行文件
 add_subdirectory(main)
 set_property(TARGET main PROPERTY FOLDER "Tools")
+
+add_subdirectory(TestEventBus)
+set_property(TARGET TestEventBus PROPERTY FOLDER "Tools")
