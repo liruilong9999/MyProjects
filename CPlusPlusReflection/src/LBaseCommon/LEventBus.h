@@ -18,7 +18,7 @@ class EventBus
 public:
     struct CallbackItem
     {
-        using CallbackFunc = void (*)(int, std::shared_ptr<EventData>, int);
+        using CallbackFunc = std::function<void(int, std::shared_ptr<EventData>, int)>;
         CallbackFunc              callback;
         int                       priority;
         std::weak_ptr<void>       context;
@@ -48,8 +48,8 @@ public:
     ~EventBus();
 
     void post(int eventCode, std::shared_ptr<EventData> data, int receiverId);
-    void subscribe(int eventCode, void (*callback)(int, std::shared_ptr<EventData>, int), int priority = 0, std::shared_ptr<void> context = nullptr);
-    void unsubscribe(int eventCode, void (*callback)(int, std::shared_ptr<EventData>, int));
+    void subscribe(int eventCode, std::function<void(int, std::shared_ptr<EventData>, int)> callback, int priority = 0, std::shared_ptr<void> context = nullptr);
+    void unsubscribe(int eventCode, std::function<void(int, std::shared_ptr<EventData>, int)> callback);
     void unsubscribeByContext(std::shared_ptr<void> context);
     void stop();
 
@@ -72,6 +72,12 @@ private:
 
     void executeCallback(const CallbackItem& callbackItem, int eventCode, std::shared_ptr<EventData> data, int receiverId);
 };
+
+template <typename EventData>
+bool operator==(const typename EventBus<EventData>::CallbackItem& item1, const typename EventBus<EventData>::CallbackItem& item2)
+{
+    return item1.callback == item2.callback && item1.context.lock() == item2.context.lock();
+}
 
 template <typename EventData>
 EventBus<EventData>::EventBus()
@@ -100,7 +106,7 @@ void EventBus<EventData>::post(int eventCode, std::shared_ptr<EventData> data, i
 }
 
 template <typename EventData>
-void EventBus<EventData>::subscribe(int eventCode, void (*callback)(int, std::shared_ptr<EventData>, int), int priority, std::shared_ptr<void> context)
+void EventBus<EventData>::subscribe(int eventCode, std::function<void(int, std::shared_ptr<EventData>, int)> callback, int priority, std::shared_ptr<void> context)
 {
     std::lock_guard<std::mutex> lock(eventCallbacks[eventCode].mutex);
     CallbackItem                callbackItem = {callback, priority, context, std::chrono::milliseconds::zero()};
@@ -110,7 +116,7 @@ void EventBus<EventData>::subscribe(int eventCode, void (*callback)(int, std::sh
 }
 
 template <typename EventData>
-void EventBus<EventData>::unsubscribe(int eventCode, void (*callback)(int, std::shared_ptr<EventData>, int))
+void EventBus<EventData>::unsubscribe(int eventCode, std::function<void(int, std::shared_ptr<EventData>, int)> callback)
 {
     std::lock_guard<std::mutex> lock(eventCallbacks[eventCode].mutex);
     auto&                       callbacks = eventCallbacks[eventCode].callbacks;
@@ -217,24 +223,26 @@ void EventBus<EventData>::handleEvents(const EventQueueItem& eventQueueItem)
             auto start   = std::chrono::steady_clock::now();
             auto end     = start + callbackItem.timeout;
             bool timeout = false;
-
-            while (std::chrono::steady_clock::now() < end)
+            while (true)
             {
-                try
+                if (busTimeout.count() > 0)
                 {
-                    executeCallback(callbackItem, eventQueueItem.eventCode, eventQueueItem.data, eventQueueItem.receiverId);
+                    auto now = std::chrono::steady_clock::now();
+                    if (now > end)
+                    {
+                        timeout = true;
+                        break;
+                    }
+                }
+                executeCallback(callbackItem, eventQueueItem.eventCode, eventQueueItem.data, eventQueueItem.receiverId);
+                if (callbackItem.timeout.count() == 0)
+                {
                     break;
                 }
-                catch (const std::exception&)
-                {
-                    // Handle exception
-                    // ...
-                }
             }
-
             if (timeout)
             {
-                // Handle timeout event
+                // Handle callback timeout event
                 // ...
             }
         }
@@ -244,7 +252,6 @@ void EventBus<EventData>::handleEvents(const EventQueueItem& eventQueueItem)
 template <typename EventData>
 void EventBus<EventData>::removeExpiredCallbacks()
 {
-    std::lock_guard<std::mutex> lock(eventQueueMutex);
     for (auto& eventCallbacksItem : eventCallbacks)
     {
         std::lock_guard<std::mutex> lock(eventCallbacksItem.second.mutex);
@@ -268,7 +275,7 @@ void EventBus<EventData>::executeCallback(const CallbackItem& callbackItem, int 
     }
     catch (const std::exception& e)
     {
-        // 记录异常日志
+        // Handle callback exception
         // ...
     }
 }
