@@ -10,17 +10,71 @@
 
 #include "LWebView.h"
 
- LWebView::LWebView(QObject* parent /*= nullptr*/)
+#include <QFile>
+#include <QWebEngineProfile>
+#include <QWebEngineScript>
+#include <QWebEngineScriptCollection>
+
+QString Loadtext(QString path)
 {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+    {
+        // 处理文件打开错误
+        return QString();
+    }
+
+    QTextStream in(&file);
+    QString     content = in.readAll();
+
+    file.close();
+
+    return content;
+}
+
+class LWebViewInitializer
+{
+public:
+    LWebViewInitializer()
+    {
+        QWebEngineScript script;
+        script.setInjectionPoint(QWebEngineScript::DocumentCreation);
+        script.setWorldId(QWebEngineScript::MainWorld);
+        script.setSourceCode(Loadtext(":/qwebchannel.js"));
+        if (_Isok = !script.isNull())
+        {
+            QWebEngineProfile*          file       = QWebEngineProfile::defaultProfile();
+            QWebEngineScriptCollection* collection = file->scripts();
+            collection->insert(script);
+        }
+    }
+
+public:
+    bool isok() const { return _Isok; }
+
+private:
+    bool _Isok = true;
+};
+
+LWebView::LWebView(QObject* parent /*= nullptr*/)
+{
+    // 初始化LWebView
+    LWebViewInitializer initializer;
+    if (!initializer.isok())
+    {
+        qDebug() << "Failed to initialize LWebView";
+        return;
+    }
 }
 
 LWebView::~LWebView()
 {
+
 }
 
 void LWebView::sendMsg(QWebEnginePage* page, const QString& msg)
 {
-    page->runJavaScript(QString("recvMessage('%1');").arg(msg));
+    page->runJavaScript(QString("displayString('%1');").arg(msg));
 }
 
 void LWebView::onMsg(const QString& msg)

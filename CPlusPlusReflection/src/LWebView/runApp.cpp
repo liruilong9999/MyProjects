@@ -26,3 +26,8 @@ runApp::runApp(QWidget* parent)
 runApp::~runApp()
 {
 }
+
+void runApp::on_pushButton_clicked()
+{
+	m_LwebView->sendMsg(m_webView->page(),"dfa3412341234");
+}

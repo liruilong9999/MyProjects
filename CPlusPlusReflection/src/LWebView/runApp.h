@@ -14,7 +14,8 @@ class runApp:public QWidget
 public:
 	runApp(QWidget * parent = nullptr);
 	~runApp();
-
+public slots:
+	void on_pushButton_clicked();
 
 private:
     QWebEngineView* m_webView;

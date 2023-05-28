@@ -17,6 +17,9 @@ set_property(TARGET LBaseCommon PROPERTY FOLDER "Base")
 add_subdirectory(LWebView)
 set_property(TARGET LWebView PROPERTY FOLDER "Base")
 
+add_subdirectory(QtJsWebEngine)
+set_property(TARGET QtJsWebEngine PROPERTY FOLDER "Base")
+
 add_subdirectory(LUserDialog)
 set_property(TARGET LUserDialog PROPERTY FOLDER "Base")
 
@@ -38,3 +41,5 @@ set_property(TARGET MyPlugin PROPERTY FOLDER "plugins")
 
 add_subdirectory(TestEventBus)
 set_property(TARGET TestEventBus PROPERTY FOLDER "Tools")
+
+

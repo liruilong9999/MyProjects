@@ -7,7 +7,7 @@ int main(int argc, char* argv[])
 
      CustomWindow window;
      window.setWindowTitle("Custom Window");
-     //window.resize(400, 300);
+     window.resize(1920, 1080);
      window.show();
 
 
