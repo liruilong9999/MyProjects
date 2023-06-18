@@ -36,8 +36,16 @@ macro(CreateTarget ProjectName Type)
     # 头文件搜索的路径
     include_directories(${CURRENT_PATH})
     include_directories(${ROOT_DIR}/include)
+	include_directories(${ROOT_DIR}/bin/include)
     include_directories(${ROOT_DIR}/src)
 
+	
+	# 静态库文件搜索的路径
+	link_directories(${CURRENT_PATH})
+    link_directories(${ROOT_DIR}/lib)
+	link_directories(${ROOT_DIR}/bin/lib)
+    link_directories(${ROOT_DIR}/src)
+	link_directories(${ROOT_DIR}/bin/lib/boost)
     # 添加 qt 头文件
     if(NOT("${QT_LIBRARY_LIST}" STREQUAL ""))
         AddQtInc("${QT_LIBRARY_LIST}" "${FORM_FILES}" "${RESOURCE_FILES}")
