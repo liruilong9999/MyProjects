@@ -1,11 +1,11 @@
 # 设置 qt 目录
 if(CMAKE_CXX_PLATFORM_ID MATCHES "Windows")
     # 方法一
-    set(Qt5_DIR "D:\\code\\ThirdPart\\Qt5.14\\lib\\cmake\\Qt5")
+    set(Qt5_DIR "C:\\Qt\\Qt5.14.2\\5.14.2\\msvc2017_64\\lib\\cmake\\Qt5")
     # 方法二
-    # set(CMAKE_PREFIX_PATH "C:\\Qt\\Qt5.14.2\\5.14.2\\msvc2017_64")
+    # set(CMAKE_PREFIX_PATH "C:\\Qt\\Qt5.14.2\\5.14.2\\msvc2017_64\\lib\\cmake\\Qt5")
 elseif(CMAKE_CXX_PLATFORM_ID MATCHES "MinGW")
-    set(CMAKE_PREFIX_PATH "D:\\code\\ThirdPart\\Qt5.14\\lib\\cmake\\Qt5")
+    set(CMAKE_PREFIX_PATH "C:\\Qt\\Qt5.14.2\\5.14.2\\msvc2017_64\\lib\\cmake\\Qt5")
 elseif(CMAKE_CXX_PLATFORM_ID MATCHES "Linux")
 endif()
 
